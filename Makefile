@@ -57,11 +57,11 @@ test: fmt vet ## Run tests.
 
 ##@ Build
 
-build: generate fmt vet ## Build exporter binary.
-	go build -o bin/exporter main.go
+build: fmt vet ## Build exporter binary.
+	go build -o bin/port-scan-exporter port-scan-exporter.go
 
 run: fmt vet ## Run a controller from your host.
-	go run ./main.go
+	go run ./port-scan-exporter.go
 
 docker-build: test ## Build docker image with the exporter.
 	docker build -t ${IMG} .

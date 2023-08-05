@@ -10,15 +10,15 @@ COPY go.sum go.sum
 RUN go mod download
 
 # Copy the go source
-COPY main.go main.go
+COPY port-scan-exporter.go port-scan-exporter.go
 
 # Build
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GO111MODULE=on go build -a -o exporter main.go
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GO111MODULE=on go build -a -o port-scan-exporter port-scan-exporter.go
 
 # Use distroless as minimal base image to package the exporter binary
 FROM gcr.io/distroless/static:nonroot
 WORKDIR /
-COPY --from=builder /workspace/exporter .
+COPY --from=builder /workspace/port-scan-exporter .
 USER 65532:65532
 
-ENTRYPOINT ["/exporter"]
+ENTRYPOINT ["/port-scan-exporter"]
