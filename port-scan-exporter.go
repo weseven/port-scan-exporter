@@ -75,8 +75,8 @@ func (c *customCollector) Collect(ch chan<- prometheus.Metric) {
 
 	var wg sync.WaitGroup
 	openPorts := prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "open_ports",
-		Help: "The number of open ports on a pod",
+		Name: "pods_open_ports",
+		Help: "Metric has value 1 if the port specified in the port label is open for the pod.",
 	}, []string{"namespace", "pod", "port"})
 
 	for _, pod := range podList.Items {
@@ -150,10 +150,10 @@ func scanPorts(targetIP string, fromPort, toPort int, results chan<- scanResult)
 func healthHandler(w http.ResponseWriter, r *http.Request) {
 	if healthy {
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("Exporter is healthy.\n"))
+		_, _ = w.Write([]byte("port-scan-exporter is healthy.\n"))
 	} else {
 		w.WriteHeader(http.StatusServiceUnavailable)
-		_, _ = w.Write([]byte("Exporter is not healthy.\n"))
+		_, _ = w.Write([]byte("port-scan-exporter is not healthy.\n"))
 	}
 }
 
@@ -163,5 +163,6 @@ func main() {
 
 	http.Handle("/metrics", promhttp.Handler())
 	http.HandleFunc("/health", healthHandler)
+	fmt.Println("port-scan-exporter starting on port 8080")
 	http.ListenAndServe(":8080", nil)
 }
