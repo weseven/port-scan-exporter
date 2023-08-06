@@ -14,7 +14,13 @@ imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
 
-RBAC:
+# Set a NetworkPolicy with:
+# ingress only on service.port
+# egress to all pods
+networkPolicy:
+  enabled: true
+
+rbac:
   # Whether to create RBAC resources (serviceAccount, clusterRole, and clusterRoleBinding).
   create: true
   # Annotations to add to the RBAC resources
@@ -40,6 +46,7 @@ securityContext: {}
 service:
   type: ClusterIP
   port: 8080
+  portName: http
 
 resources: {}
   # We usually recommend not to specify default resources and to leave this as a conscious
@@ -53,10 +60,50 @@ resources: {}
   #   cpu: 100m
   #   memory: 128Mi
 
+# Add a ServiceMonitor for prometheus-operator
+monitor:
+  enabled: false
+  additionalLabels: {}
+
+  jobLabel: ""
+
+  # List of pod labels to add to node exporter metrics
+  # https://github.com/prometheus-operator/prometheus-operator/blob/main/Documentation/api.md#servicemonitor
+  podTargetLabels: []
+
+  scheme: http
+
+  relabelings: []
+  metricRelabelings: []
+  interval: "5m"
+  scrapeTimeout: 240s
+  ## prometheus.monitor.apiVersion ApiVersion for the serviceMonitor Resource(defaults to "monitoring.coreos.com/v1")
+  apiVersion: ""
+
+  ## SampleLimit defines per-scrape limit on number of scraped samples that will be accepted.
+  ##
+  sampleLimit: 0
+
+  ## TargetLimit defines a limit on the number of scraped targets that will be accepted.
+  ##
+  targetLimit: 0
+
+  ## Per-scrape limit on number of labels that will be accepted for a sample. Only valid in Prometheus versions 2.27.0 and newer.
+  ##
+  labelLimit: 0
+
+  ## Per-scrape limit on length of labels name that will be accepted for a sample. Only valid in Prometheus versions 2.27.0 and newer.
+  ##
+  labelNameLengthLimit: 0
+
+  ## Per-scrape limit on length of labels value that will be accepted for a sample. Only valid in Prometheus versions 2.27.0 and newer.
+  ##
+  labelValueLengthLimit: 0
+
 autoscaling:
   enabled: false
   minReplicas: 1
-  maxReplicas: 100
+  maxReplicas: 5
   targetCPUUtilizationPercentage: 80
   # targetMemoryUtilizationPercentage: 80
 
