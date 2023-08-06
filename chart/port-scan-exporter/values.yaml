@@ -1,8 +1,11 @@
 # Default values for port-scan-exporter.
 # This is a YAML-formatted file.
 # Declare variables to be passed into your templates.
-
-replicaCount: 1
+config:
+  listen_address: ":8080"
+  portscan_workers: 60
+  portscan_timeout_ms: 150
+  max_port: 65535
 
 image:
   repository: dsimionato/port-scan-exporter
@@ -10,6 +13,7 @@ image:
   # Overrides the image tag whose default is the chart appVersion.
   tag: ""
 
+replicaCount: 1
 imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
