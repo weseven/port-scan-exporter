@@ -91,9 +91,14 @@ func (c *portScanCollector) Describe(ch chan<- *prometheus.Desc) {
 
 func (c *portScanCollector) Collect(ch chan<- prometheus.Metric) {
 	var wg sync.WaitGroup
-	openPorts := prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "portscan_open_ports",
-		Help: "Metric has value 1 if the port specified in the port label is open for the pod.",
+	openTCPPorts := prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "portscan_open_tcp_ports",
+		Help: "Metric has value 1 if the tcp port specified in the port label is open for the pod.",
+	}, []string{"namespace", "pod", "port"})
+
+	openUDPPorts := prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "portscan_open_udp_ports",
+		Help: "Metric has value 1 if the udp port specified in the port label is open for the pod.",
 	}, []string{"namespace", "pod", "port"})
 
 	podList, err := getPodList()
@@ -107,31 +112,32 @@ func (c *portScanCollector) Collect(ch chan<- prometheus.Metric) {
 	start := time.Now()
 	for _, pod := range podList.Items {
 		//exclude pods using Host network
-		if !pod.Spec.HostNetwork {
-			wg.Add(1)
-			go func(podName, namespace, podIP string) {
-				defer wg.Done()
-				collectOpenPorts(openPorts, namespace, podName, podIP)
-			}(pod.Name, pod.Namespace, pod.Status.PodIP)
-		}
+		// if !pod.Spec.HostNetwork {
+		wg.Add(1)
+		go func(podName, namespace, podIP string) {
+			defer wg.Done()
+			collectOpenPorts(openTCPPorts, openUDPPorts, namespace, podName, podIP)
+		}(pod.Name, pod.Namespace, pod.Status.PodIP)
+		// }
 	}
 
 	wg.Wait()
 	scanDuration := time.Since(start).Milliseconds()
 
-	openPorts.Collect(ch)
+	openTCPPorts.Collect(ch)
 	ch <- prometheus.MustNewConstMetric(c.podsPortScanned, prometheus.CounterValue, float64(len(podList.Items)))
 	ch <- prometheus.MustNewConstMetric(c.portScanDuration, prometheus.CounterValue, float64(scanDuration))
 	log.Printf("Finished port scan on %d pods in %dms.", len(podList.Items), scanDuration)
 }
 
-func collectOpenPorts(openPorts *prometheus.GaugeVec, namespace, podName, podIP string) {
+func collectOpenPorts(openTCPPorts *prometheus.GaugeVec, openUDPPorts *prometheus.GaugeVec, namespace, podName, podIP string) {
 	if podIP == "" {
 		return
 	}
 
 	var wg sync.WaitGroup
-	results := make(chan scanResult)
+	tcpResults := make(chan scanResult)
+	udpResults := make(chan scanResult)
 
 	wg.Add(portScanWorkers)
 	portsPerWorker := maxPort / portScanWorkers
@@ -145,17 +151,21 @@ func collectOpenPorts(openPorts *prometheus.GaugeVec, namespace, podName, podIP 
 
 		go func() {
 			defer wg.Done()
-			scanPorts(podIP, fromPort, toPort, results)
+			scanPorts(podIP, fromPort, toPort, tcpResults, udpResults)
 		}()
 	}
 
 	go func() {
 		wg.Wait()
-		close(results)
+		close(tcpResults)
+		close(udpResults)
 	}()
 
-	for res := range results {
-		openPorts.WithLabelValues(namespace, podName, fmt.Sprintf("%d", res.port)).Set(res.isOpen)
+	for res := range tcpResults {
+		openTCPPorts.WithLabelValues(namespace, podName, fmt.Sprintf("%d", res.port)).Set(res.isOpen)
+	}
+	for res := range udpResults {
+		openUDPPorts.WithLabelValues(namespace, podName, fmt.Sprintf("%d", res.port)).Set(res.isOpen)
 	}
 }
 
@@ -165,16 +175,35 @@ type scanResult struct {
 	isOpen float64 // 1 if the port is open.
 }
 
-func scanPorts(targetIP string, fromPort, toPort int, results chan<- scanResult) {
+func scanPorts(targetIP string, fromPort, toPort int, tcpResults chan<- scanResult, udpResults chan<- scanResult) {
 	for port := fromPort; port < toPort; port++ {
 		target := fmt.Sprintf("%s:%d", targetIP, port)
-		conn, err := net.DialTimeout("tcp", target, portScanTimeout)
-		if err == nil {
-			conn.Close()
-			results <- scanResult{port: port, isOpen: 1}
-			log.Printf("%s:%d is open\n", targetIP, port)
+		tcpConn, tcpErr := net.DialTimeout("tcp", target, portScanTimeout)
+		if tcpErr == nil {
+			tcpConn.Close()
+			tcpResults <- scanResult{port: port, isOpen: 1}
+			log.Printf("%s:%d/TCP is open\n", targetIP, port)
+		}
+		udpConn, udpErr := net.DialTimeout("udp", target, portScanTimeout)
+		if udpErr == nil {
+			udpConn.Close()
+			udpResults <- scanResult{port: port, isOpen: 1}
+			log.Printf("%s:%d/UDP is open\n", targetIP, port)
 		}
 	}
+	// for udpPort := fromPort; udpPort < toPort; udpPort++ {
+	// 	// Attempt UDP connection
+	// 	udpAddr, err := net.ResolveUDPAddr("udp", targetIP)
+	// 	if err == nil {
+	// 		conn, err := net.DialUDP("udp", nil, udpAddr)
+	// 		if err == nil {
+	// 			_ = conn.Close()
+	// 			udpResults <- scanResult{port: udpPort, isOpen: 1}
+	// 			log.Printf("%s:%d/UDP is open\n", targetIP, udpPort)
+	// 			continue // Move to the next port
+	// 		}
+	// 	}
+	// }
 }
 
 // TODO: non-naive implementation of health checks
