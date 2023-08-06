@@ -65,14 +65,20 @@ func getPodList() (*v1.PodList, error) {
 }
 
 type portScanCollector struct {
-	podsPortScanned *prometheus.Desc
+	podsPortScanned  *prometheus.Desc
+	portScanDuration *prometheus.Desc
 }
 
 func newPortScanCollector() *portScanCollector {
 	return &portScanCollector{
 		podsPortScanned: prometheus.NewDesc(
-			"pods_port_scanned",
+			"portscan_pods_scanned",
 			"The number of pods scanned for open ports",
+			nil, nil,
+		),
+		portScanDuration: prometheus.NewDesc(
+			"portscan_scan_duration",
+			"The duration of the port scan in milliseconds",
 			nil, nil,
 		),
 	}
@@ -80,12 +86,13 @@ func newPortScanCollector() *portScanCollector {
 
 func (c *portScanCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.podsPortScanned
+	ch <- c.portScanDuration
 }
 
 func (c *portScanCollector) Collect(ch chan<- prometheus.Metric) {
 	var wg sync.WaitGroup
 	openPorts := prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "pods_open_ports",
+		Name: "portscan_open_ports",
 		Help: "Metric has value 1 if the port specified in the port label is open for the pod.",
 	}, []string{"namespace", "pod", "port"})
 
@@ -96,6 +103,8 @@ func (c *portScanCollector) Collect(ch chan<- prometheus.Metric) {
 		return
 	}
 
+	log.Printf("Starting port scan on %d pods...", len(podList.Items))
+	start := time.Now()
 	for _, pod := range podList.Items {
 		//exclude pods using Host network
 		if !pod.Spec.HostNetwork {
@@ -108,9 +117,12 @@ func (c *portScanCollector) Collect(ch chan<- prometheus.Metric) {
 	}
 
 	wg.Wait()
+	scanDuration := time.Since(start).Milliseconds()
 
 	openPorts.Collect(ch)
 	ch <- prometheus.MustNewConstMetric(c.podsPortScanned, prometheus.CounterValue, float64(len(podList.Items)))
+	ch <- prometheus.MustNewConstMetric(c.portScanDuration, prometheus.CounterValue, float64(scanDuration))
+	log.Printf("Finished port scan on %d pods in %dms.", len(podList.Items), scanDuration)
 }
 
 func collectOpenPorts(openPorts *prometheus.GaugeVec, namespace, podName, podIP string) {
