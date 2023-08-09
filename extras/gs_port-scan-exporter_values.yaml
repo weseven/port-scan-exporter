@@ -1,0 +1,10 @@
+config:
+  listen_address: ":8080"
+  portscan_workers: 60
+  portscan_timeout_ms: 150
+  max_port: 65535
+
+monitor:
+  enabled: true
+  interval: "5m"
+  scrapeTimeout: 240s
