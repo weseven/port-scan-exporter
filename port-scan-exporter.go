@@ -23,40 +23,45 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
-// Config struct to hold the configuration parameters.
-type Config struct {
-	ListenAddress     string `yaml:"listen_address"`
-	PortScanWorkers   int    `yaml:"portscan_workers"`
-	PortScanTimeoutMs int    `yaml:"portscan_timeout_ms"`
-	MaxPort           int    `yaml:"max_port"`
+// portScanCollectorConfig struct to hold the configuration parameters.
+type portScanCollectorConfig struct {
+	// Listen address.
+	ListenAddress string `yaml:"listen_address"`
+	// Workers scanning ports on each pod.
+	PortScanWorkers int `yaml:"portscan_workers"`
+	// Timeout (in ms) after which consider a port to be closed.
+	PortScanTimeoutMs int `yaml:"portscan_timeout_ms"`
+	// Highest port number to scan.
+	MaxPort int `yaml:"max_port"`
+
+	// Timeout in time.Duration
+	PortScanTimeout time.Duration
 }
 
 // LoadConfig loads the configuration from the YAML file.
-func loadConfig(filename string) (*Config, error) {
+func loadConfig(filename string) (*portScanCollectorConfig, error) {
 	configFile, err := os.ReadFile(filename)
 	if err != nil {
 		return nil, err
 	}
 
-	config := &Config{}
+	config := &portScanCollectorConfig{}
 	if err := yaml.Unmarshal(configFile, config); err != nil {
 		return nil, err
 	}
+	config.PortScanTimeout = time.Duration(config.PortScanTimeoutMs) * time.Millisecond
 
 	return config, nil
 }
 
-// Highest port number to scan.
-var maxPort int
-
-// Workers scanning ports on each pod.
-var portScanWorkers int
-
-// Timeout after which consider a port to be closed.
-var portScanTimeout time.Duration
-
-// Listen address.
-var listenAddress string
+// Function to print the current config
+func printConfig(config *portScanCollectorConfig) {
+	log.Println("Current configuration:")
+	log.Printf("ListenAddress: %s\n", config.ListenAddress)
+	log.Printf("PortScanWorkers: %d\n", config.PortScanWorkers)
+	log.Printf("PortScanTimeoutMs: %d\n", config.PortScanTimeoutMs)
+	log.Printf("MaxPort: %d\n", config.MaxPort)
+}
 
 // Global variable to track the exporter's health status.
 var healthy bool = true
@@ -93,9 +98,12 @@ func getPodList() (*v1.PodList, error) {
 type portScanCollector struct {
 	podsPortScanned  *prometheus.Desc
 	portScanDuration *prometheus.Desc
+
+	// portScanCollector config
+	config *portScanCollectorConfig
 }
 
-func newPortScanCollector() *portScanCollector {
+func newPortScanCollector(config *portScanCollectorConfig) *portScanCollector {
 	return &portScanCollector{
 		podsPortScanned: prometheus.NewDesc(
 			"portscan_pods_scanned",
@@ -107,6 +115,7 @@ func newPortScanCollector() *portScanCollector {
 			"The duration of the port scan in milliseconds",
 			nil, nil,
 		),
+		config: config,
 	}
 }
 
@@ -137,7 +146,7 @@ func (c *portScanCollector) Collect(ch chan<- prometheus.Metric) {
 			wg.Add(1)
 			go func(podName, namespace, podIP string) {
 				defer wg.Done()
-				collectOpenPorts(openPorts, namespace, podName, podIP)
+				collectOpenPorts(openPorts, c.config, namespace, podName, podIP)
 			}(pod.Name, pod.Namespace, pod.Status.PodIP)
 		}
 	}
@@ -151,7 +160,7 @@ func (c *portScanCollector) Collect(ch chan<- prometheus.Metric) {
 	log.Printf("Finished port scan on %d pods in %fs.", len(podList.Items), scanDuration)
 }
 
-func collectOpenPorts(openPorts *prometheus.GaugeVec, namespace, podName, podIP string) {
+func collectOpenPorts(openPorts *prometheus.GaugeVec, collectorCfg *portScanCollectorConfig, namespace, podName, podIP string) {
 	if podIP == "" {
 		return
 	}
@@ -159,19 +168,19 @@ func collectOpenPorts(openPorts *prometheus.GaugeVec, namespace, podName, podIP 
 	var wg sync.WaitGroup
 	results := make(chan scanResult)
 
-	wg.Add(portScanWorkers)
-	portsPerWorker := maxPort / portScanWorkers
+	wg.Add(collectorCfg.PortScanWorkers)
+	portsPerWorker := collectorCfg.MaxPort / collectorCfg.PortScanWorkers
 
-	for i := 0; i < portScanWorkers; i++ {
+	for i := 0; i < collectorCfg.PortScanWorkers; i++ {
 		fromPort := i * portsPerWorker
 		toPort := (i + 1) * portsPerWorker
-		if i == portScanWorkers-1 {
-			toPort = maxPort
+		if i == collectorCfg.PortScanWorkers-1 {
+			toPort = collectorCfg.MaxPort
 		}
 
 		go func() {
 			defer wg.Done()
-			scanPorts(podIP, fromPort, toPort, results)
+			scanPorts(podIP, fromPort, toPort, collectorCfg.PortScanTimeout, results)
 		}()
 	}
 
@@ -192,10 +201,10 @@ type scanResult struct {
 }
 
 // Scan pod for open TCP ports
-func scanPorts(targetIP string, fromPort, toPort int, results chan<- scanResult) {
+func scanPorts(targetIP string, fromPort, toPort int, portTimeout time.Duration, results chan<- scanResult) {
 	for port := fromPort; port < toPort; port++ {
 		target := fmt.Sprintf("%s:%d", targetIP, port)
-		conn, err := net.DialTimeout("tcp", target, portScanTimeout)
+		conn, err := net.DialTimeout("tcp", target, portTimeout)
 		if err == nil {
 			conn.Close()
 			results <- scanResult{port: port, isOpen: 1}
@@ -222,17 +231,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("Error loading config: %v", err)
 	}
-	portScanTimeout = time.Duration(config.PortScanTimeoutMs) * time.Millisecond
-	portScanWorkers = config.PortScanWorkers
-	listenAddress = config.ListenAddress
-	maxPort = config.MaxPort
-	log.Println("Loaded configuration:")
-	log.Printf("Listen address: %s\n", listenAddress)
-	log.Printf("Port scan workers: %d\n", portScanWorkers)
-	log.Printf("Port scan timeout: %s\n", portScanTimeout)
-	log.Printf("Max port: %d\n", maxPort)
+	printConfig(config)
 
-	portScanCollector := newPortScanCollector()
+	portScanCollector := newPortScanCollector(config)
 	prometheus.MustRegister(portScanCollector)
 
 	http.Handle("/metrics", promhttp.Handler())
@@ -240,13 +241,13 @@ func main() {
 
 	// Run the exporter on a separate goroutine to keep it running in the background.
 	go func() {
-		err := http.ListenAndServe(listenAddress, nil)
+		err := http.ListenAndServe(config.ListenAddress, nil)
 		if err != nil {
 			log.Fatalf("Error starting the port-scan-exporter: %v", err)
 			healthy = false
 		}
 	}()
-	log.Printf("port-scan-exporter is listening on %s\n", listenAddress)
+	log.Printf("port-scan-exporter is listening on %s\n", config.ListenAddress)
 
 	// Graceful shutdown when receiving SIGTERM signal.
 	c := make(chan os.Signal, 1)
