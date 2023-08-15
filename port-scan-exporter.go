@@ -138,12 +138,14 @@ func (c *portScanCollector) Collect(ch chan<- prometheus.Metric) {
 		return
 	}
 
-	log.Printf("Starting port scan on %d pods...", len(podList.Items))
+	log.Println("Starting port scan on pods...")
 	start := time.Now()
+	scannedPods := 0
 	for _, pod := range podList.Items {
 		//exclude pods using Host network
 		if !pod.Spec.HostNetwork {
 			wg.Add(1)
+			scannedPods++
 			go func(podName, namespace, podIP string) {
 				defer wg.Done()
 				collectOpenPorts(openPorts, c.config, namespace, podName, podIP)
@@ -155,9 +157,9 @@ func (c *portScanCollector) Collect(ch chan<- prometheus.Metric) {
 	scanDuration := time.Since(start).Seconds()
 
 	openPorts.Collect(ch)
-	ch <- prometheus.MustNewConstMetric(c.podsPortScanned, prometheus.CounterValue, float64(len(podList.Items)))
+	ch <- prometheus.MustNewConstMetric(c.podsPortScanned, prometheus.CounterValue, float64(scannedPods))
 	ch <- prometheus.MustNewConstMetric(c.portScanDuration, prometheus.CounterValue, scanDuration)
-	log.Printf("Finished port scan on %d pods in %fs.", len(podList.Items), scanDuration)
+	log.Printf("Finished port scan on %d pods in %fs.", scannedPods, scanDuration)
 }
 
 func collectOpenPorts(openPorts *prometheus.GaugeVec, collectorCfg *portScanCollectorConfig, namespace, podName, podIP string) {
