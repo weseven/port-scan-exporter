@@ -4,6 +4,11 @@ config:
   portscan_timeout_ms: 150
   max_port: 65535
 
+rbac:
+  create: true
+  podSecurityPolicy:
+    enabled: true
+
 monitor:
   enabled: true
   interval: "5m"

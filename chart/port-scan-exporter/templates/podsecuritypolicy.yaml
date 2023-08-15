@@ -1,0 +1,40 @@
+{{- if and .Values.rbac.podSecurityPolicy.enabled .Values.rbac.create }}
+apiVersion: policy/v1beta1
+kind: PodSecurityPolicy
+metadata:
+  name: {{ include "port-scan-exporter.fullname" . }}
+  labels:
+    {{- include "port-scan-exporter.labels" . | nindent 4 }}
+spec:
+  {{- toYaml .Values.rbac.podSecurityPolicy.policy | nindent 2 }}
+{{- end }}
+---
+{{- if and .Values.rbac.podSecurityPolicy.enabled .Values.rbac.create }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "port-scan-exporter.fullname" . }}-psp
+  namespace: {{ .Release.Namespace }}
+rules:
+- apiGroups: [policy]
+  resources: [podsecuritypolicies]
+  verbs: [use]
+  resourceNames: 
+    - {{ include "port-scan-exporter.fullname" . }}
+{{- end }}
+---
+{{- if and .Values.rbac.podSecurityPolicy.enabled .Values.rbac.create }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "port-scan-exporter.fullname" . }}-psp
+  namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "port-scan-exporter.fullname" . }}-psp
+subjects:
+- kind: ServiceAccount
+  name: {{ .Values.rbac.serviceAccountName }}
+  namespace: {{ .Release.Namespace }}
+{{- end }}

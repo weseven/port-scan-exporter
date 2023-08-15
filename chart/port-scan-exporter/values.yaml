@@ -33,11 +33,51 @@ rbac:
   serviceAccountName: "port-scan-exporter-sa"
   # The name of the cluster role to use.
   clusterRoleName: "port-scan-exporter"
+  podSecurityPolicy:
+    # Deprecated in k8s 1.21+, unavailable in 1.25+
+    enabled: false
+    policy:
+      privileged: false
+      allowPrivilegeEscalation: false
+      volumes:
+        - configMap
+      hostNetwork: false
+      hostIPC: false
+      hostPID: false
+      readOnlyRootFilesystem: true
+      allowedCapabilities:
+        - NET_RAW
+        - NET_BIND_SERVICE
+      requiredDropCapabilities:
+        - ALL
+      fsGroup:
+        rule: MustRunAs
+        ranges:
+          # Forbid adding the root group.
+          - max: 65535
+            min: 1
+      runAsGroup:
+        rule: MustRunAs
+        ranges:
+          # Forbid adding the root group.
+          - max: 65535
+            min: 1
+      supplementalGroups:
+        rule: 'MustRunAs'
+        ranges:
+          # Forbid adding the root group.
+          - min: 1
+            max: 65535
+      runAsUser:
+        rule: MustRunAsNonRoot
+      seLinux:
+        rule: RunAsAny
 
 podAnnotations: {}
 
 podSecurityContext: {}
   # fsGroup: 2000
+
 
 securityContext: {}
   # capabilities:
