@@ -14,7 +14,7 @@ PROJECT_NAME ?= $(shell go list -m | cut -d '/' -f 3)
 # The version which will be reported by the --version argument of each binary
 # and which will be used as the Docker image tag
 # VERSION ?= $(shell git describe --tags)
-VERSION ?= 0.1
+VERSION ?= 0.2
 ## The Docker repository name, overridden in CI.
 DOCKER_REGISTRY ?= docker.io/dsimionato
 DOCKER_IMAGE_NAME ?= ${PROJECT_NAME}

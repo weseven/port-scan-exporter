@@ -3,9 +3,11 @@
 # Declare variables to be passed into your templates.
 config:
   listen_address: ":8080"
-  portscan_workers: 60
   portscan_timeout_ms: 150
   max_port: 65535
+  rescan_interval_minutes: 10
+  portscan_workers: 10
+  expire_after_minutes: 720
 
 image:
   repository: dsimionato/port-scan-exporter
@@ -119,8 +121,8 @@ monitor:
 
   relabelings: []
   metricRelabelings: []
-  interval: "5m"
-  scrapeTimeout: 240s
+  interval: "15s"
+  scrapeTimeout: 300s
   ## prometheus.monitor.apiVersion ApiVersion for the serviceMonitor Resource(defaults to "monitoring.coreos.com/v1")
   apiVersion: ""
 
