@@ -260,23 +260,26 @@ func refreshPodInfo(podInfoCache *sync.Map, config *portScanCollectorConfig) {
 	}
 
 	for _, pod := range podList.Items {
-		podKey := fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)
-		podInfoAny, found := podInfoCache.LoadOrStore(podKey, &PodInfo{LastScanTime: time.Now(), Scanning: false})
-		podInfo := podInfoAny.(*PodInfo)
-		// if it is a new pod, or the last scan expired and it's not currently being scanned
-		if !found || (time.Since(podInfo.LastScanTime) >= config.RescanInterval && !podInfo.Scanning) {
-			podInfo.Scanning = true
-			podInfo.Namespace = pod.Namespace
-			podInfo.Name = pod.Name
+		//exclude pod using HostNetwork
+		if !pod.Spec.HostNetwork {
+			podKey := fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)
+			podInfoAny, found := podInfoCache.LoadOrStore(podKey, &PodInfo{LastScanTime: time.Now(), Scanning: false})
+			podInfo := podInfoAny.(*PodInfo)
+			// if it is a new pod, or the last scan expired and it's not currently being scanned
+			if !found || (time.Since(podInfo.LastScanTime) >= config.RescanInterval && !podInfo.Scanning) {
+				podInfo.Scanning = true
+				podInfo.Namespace = pod.Namespace
+				podInfo.Name = pod.Name
 
-			// TODO: scans one pod at a time. might be worth to add some parallelism.
-			openPorts, scanDuration := scanPodPorts(pod.Status.PodIP, config)
+				// TODO: scans one pod at a time. might be worth to add some parallelism.
+				openPorts, scanDuration := scanPodPorts(pod.Status.PodIP, config)
 
-			podInfo.LastScanTime = time.Now()
-			podInfo.Scanning = false
-			podInfo.OpenPorts = openPorts
-			podInfo.LastScanDuration = scanDuration
-			log.Printf("Scanned pod %s/%s in %d ms, open ports: %v", pod.Namespace, pod.Name, scanDuration.Milliseconds(), openPorts)
+				podInfo.LastScanTime = time.Now()
+				podInfo.Scanning = false
+				podInfo.OpenPorts = openPorts
+				podInfo.LastScanDuration = scanDuration
+				log.Printf("Scanned pod %s/%s in %d ms, open ports: %v", pod.Namespace, pod.Name, scanDuration.Milliseconds(), openPorts)
+			}
 		}
 	}
 }
