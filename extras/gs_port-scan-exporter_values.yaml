@@ -1,9 +1,9 @@
 config:
   listen_address: ":8080"
-  portscan_timeout_ms: 150
+  portscan_timeout_ms: 100
   max_port: 65535
   rescan_interval_minutes: 10
-  portscan_workers: 6
+  portscan_workers: 60
   max_parallel_pod_scans: 5
   expire_after_minutes: 720
 
@@ -16,3 +16,11 @@ monitor:
   enabled: true
   interval: "15s"
   scrapeTimeout: 300s
+
+resources:
+  limits:
+    cpu: 1
+    memory: 512Mi
+  requests:
+    cpu: 200m
+    memory: 128Mi
