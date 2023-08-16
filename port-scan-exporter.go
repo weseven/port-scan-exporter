@@ -136,10 +136,11 @@ type portScanCollector struct {
 
 	// portScanCollector config
 	config     *portScanCollectorConfig
-	podInfoMap *sync.Map
+	podInfoMap *map[string]*PodInfo
+	cacheLock  *sync.RWMutex
 }
 
-func newPortScanCollector(config *portScanCollectorConfig, infoMap *sync.Map) *portScanCollector {
+func newPortScanCollector(config *portScanCollectorConfig, infoMap *map[string]*PodInfo, cacheLock *sync.RWMutex) *portScanCollector {
 	return &portScanCollector{
 		openPorts: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
@@ -164,6 +165,7 @@ func newPortScanCollector(config *portScanCollectorConfig, infoMap *sync.Map) *p
 		),
 		config:     config,
 		podInfoMap: infoMap,
+		cacheLock:  cacheLock,
 	}
 }
 
@@ -175,19 +177,18 @@ func (c *portScanCollector) Describe(ch chan<- *prometheus.Desc) {
 
 func (c *portScanCollector) Collect(ch chan<- prometheus.Metric) {
 	// Scan the podInfoMap and gather metrics
-	c.podInfoMap.Range(func(key, value interface{}) bool {
-		podInfo := value.(*PodInfo)
+	c.cacheLock.RLock()
+	for _, podInfo := range *c.podInfoMap {
 		// Skip pods that are currently being scanned
-		if podInfo.Scanning {
-			return true
+		if !podInfo.Scanning {
+			for _, port := range podInfo.OpenPorts {
+				c.openPorts.WithLabelValues(podInfo.Namespace, podInfo.Name, strconv.Itoa(port)).Set(1)
+			}
+			c.podLastScanTime.WithLabelValues(podInfo.Namespace, podInfo.Name).Set(float64(podInfo.LastScanTime.Unix()))
+			c.podLastScanDuration.WithLabelValues(podInfo.Namespace, podInfo.Name).Set(float64(podInfo.LastScanDuration.Milliseconds()))
 		}
-		for _, port := range podInfo.OpenPorts {
-			c.openPorts.WithLabelValues(podInfo.Namespace, podInfo.Name, strconv.Itoa(port)).Set(1)
-		}
-		c.podLastScanTime.WithLabelValues(podInfo.Namespace, podInfo.Name).Set(float64(podInfo.LastScanTime.Unix()))
-		c.podLastScanDuration.WithLabelValues(podInfo.Namespace, podInfo.Name).Set(float64(podInfo.LastScanDuration.Milliseconds()))
-		return true
-	})
+	}
+	c.cacheLock.RUnlock()
 
 	c.openPorts.Collect(ch)
 	c.podLastScanTime.Collect(ch)
@@ -247,19 +248,19 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // Clean up pods from the cache that have not been scanned for 12 hours
-func cleanupExpiredInfo(podInfoCache *sync.Map, expiration time.Duration) {
-	podInfoCache.Range(func(key, value interface{}) bool {
-		podInfo := value.(*PodInfo)
+func cleanupExpiredInfo(podInfoCache *map[string]*PodInfo, cacheLock *sync.RWMutex, expiration time.Duration) {
+	cacheLock.Lock()
+	defer cacheLock.Unlock()
+	for key, podInfo := range *podInfoCache {
 		if time.Since(podInfo.LastScanTime) > expiration {
 			log.Printf("Deleting expired pod %s info from cache (last scan time: %d)", key, podInfo.LastScanTime.Unix())
-			podInfoCache.Delete(key)
+			delete(*podInfoCache, podInfo.Name)
 		}
-		return true
-	})
+	}
 }
 
 // function that gets all the pods, starts port scanning each pod and filling the podInfoMap
-func refreshPodInfo(podInfoCache *sync.Map, config *portScanCollectorConfig) {
+func refreshPodInfo(podInfoCache *map[string]*PodInfo, cacheLock *sync.RWMutex, config *portScanCollectorConfig) {
 	podList, err := getPodList()
 	if err != nil {
 		log.Println("Error getting pod list:", err)
@@ -274,9 +275,16 @@ func refreshPodInfo(podInfoCache *sync.Map, config *portScanCollectorConfig) {
 		//exclude pod using HostNetwork
 		if !pod.Spec.HostNetwork {
 			podKey := fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)
-			podInfoAny, found := podInfoCache.LoadOrStore(podKey, &PodInfo{LastScanTime: time.Now(), Scanning: false})
-			podInfo := podInfoAny.(*PodInfo)
+			podInfo, found := (*podInfoCache)[podKey]
+			// podInfoAny, found := podInfoCache.LoadOrStore(podKey, &PodInfo{LastScanTime: time.Now(), Scanning: false})
+			// podInfo := podInfoAny.(*PodInfo)
 			// if it is a new pod, or the last scan expired and it's not currently being scanned
+			if !found {
+				podInfo = &PodInfo{
+					LastScanTime: time.Now(),
+					Scanning:     false,
+				}
+			}
 			if !found || (time.Since(podInfo.LastScanTime) >= config.RescanInterval && !podInfo.Scanning) {
 
 				go func(p v1.Pod, pinfo *PodInfo) {
@@ -298,6 +306,9 @@ func refreshPodInfo(podInfoCache *sync.Map, config *portScanCollectorConfig) {
 					pinfo.OpenPorts = openPorts
 					pinfo.LastScanDuration = scanDuration
 					log.Printf("Scanned pod %s/%s in %d ms, open ports: %v", p.Namespace, p.Name, scanDuration.Milliseconds(), openPorts)
+					cacheLock.Lock()
+					(*podInfoCache)[podKey] = pinfo
+					cacheLock.Unlock()
 				}(pod, podInfo)
 			}
 		}
@@ -314,25 +325,26 @@ func main() {
 	}
 	printConfig(config)
 
-	podInfoMap := new(sync.Map)
+	podInfoMap := make(map[string]*PodInfo)
+	cacheLock := &sync.RWMutex{}
 
 	// Background loop to clean up pods from the cache that have not been scanned for 12 hours
 	go func() {
 		for {
 			time.Sleep(60 * time.Minute)
-			cleanupExpiredInfo(podInfoMap, config.ExpireAfter)
+			cleanupExpiredInfo(&podInfoMap, cacheLock, config.ExpireAfter)
 		}
 	}()
 
 	// Background loop to scan pods and fill the podInfoMap
 	go func() {
 		for {
-			refreshPodInfo(podInfoMap, config)
+			refreshPodInfo(&podInfoMap, cacheLock, config)
 			time.Sleep(5 * time.Minute)
 		}
 	}()
 
-	portScanCollector := newPortScanCollector(config, podInfoMap)
+	portScanCollector := newPortScanCollector(config, &podInfoMap, cacheLock)
 	prometheus.MustRegister(portScanCollector)
 
 	http.Handle("/metrics", promhttp.Handler())
