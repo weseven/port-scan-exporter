@@ -65,27 +65,15 @@ run: fmt vet ## Run a controller from your host.
 
 docker-build: test ## Build docker image with the exporter.
 	docker build -t ${IMG} .
+# docker-buildx build --platform linux/amd64,linux/arm64 -t ${IMG} .
+# podman build --arch amd64 -t ${IMG} .
 
 docker-push: ## Push docker image with the exporter.
 	docker push ${IMG}
 
 ##@ Deployment
 
-# install: manifests kustomize ## Install CRDs into the K8s cluster specified in ~/.kube/config.
-# 	$(KUSTOMIZE) build config/crd | kubectl apply -f -
-#
-# uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster specified in ~/.kube/config.
-# 	$(KUSTOMIZE) build config/crd | kubectl delete -f -
-#
-# deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
-# 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
-# 	$(KUSTOMIZE) build config/default | kubectl apply -f -
-#
-# undeploy: ## Undeploy controller from the K8s cluster specified in ~/.kube/config.
-# 	$(KUSTOMIZE) build config/default | kubectl delete -f -
-#
-# helm: manifests kustomize helmify ## Generate helm chart.
-# 	$(KUSTOMIZE) build config/default | $(HELMIFY)
+#TODO: add automation to package helm chart and deploy it to k8s
 
 ##@ Testing
 
