@@ -24,6 +24,8 @@ spec:
     {{- end }}
   endpoints:
     - port: {{ .Values.service.portName }}
+      targetPort: {{ .Values.service.targetPort }}
+      path: /metrics
       scheme: {{ .Values.monitor.scheme }}
       {{- with .Values.monitor.interval }}
       interval: {{ . }}

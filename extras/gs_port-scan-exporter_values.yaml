@@ -14,8 +14,8 @@ rbac:
 
 monitor:
   enabled: true
-  interval: "15s"
-  scrapeTimeout: 300s
+  interval: "30s"
+  scrapeTimeout: 20s
 
 resources:
   limits:

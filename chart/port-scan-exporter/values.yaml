@@ -122,8 +122,8 @@ monitor:
 
   relabelings: []
   metricRelabelings: []
-  interval: "15s"
-  scrapeTimeout: 300s
+  interval: "30s"
+  scrapeTimeout: 20s
   ## prometheus.monitor.apiVersion ApiVersion for the serviceMonitor Resource(defaults to "monitoring.coreos.com/v1")
   apiVersion: ""
 
