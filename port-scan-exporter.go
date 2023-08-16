@@ -32,6 +32,8 @@ type portScanCollectorConfig struct {
 	PortScanTimeoutMs int `yaml:"portscan_timeout_ms"`
 	// Workers to scan ports.
 	PortScanWorkers int `yaml:"portscan_workers"`
+	// Max parallel pod scans
+	MaxParallelPodScans int `yaml:"max_parallel_pod_scans"`
 	// Highest port number to scan.
 	MaxPort int `yaml:"max_port"`
 	// Minutes after which to rescan a pod ports
@@ -58,6 +60,11 @@ func loadConfig(filename string) (*portScanCollectorConfig, error) {
 	if err := yaml.Unmarshal(configFile, config); err != nil {
 		return nil, err
 	}
+
+	if config.MaxParallelPodScans <= 0 {
+		config.MaxParallelPodScans = 1
+	}
+
 	config.PortScanTimeout = time.Duration(config.PortScanTimeoutMs) * time.Millisecond
 	config.RescanInterval = time.Duration(config.RescanIntervalMinutes) * time.Minute
 	config.ExpireAfter = time.Duration(config.ExpireAfterMinutes) * time.Minute
@@ -71,6 +78,7 @@ func printConfig(config *portScanCollectorConfig) {
 	log.Printf("\tListenAddress: %s\n", config.ListenAddress)
 	log.Printf("\tPortScanTimeoutMs: %d\n", config.PortScanTimeoutMs)
 	log.Printf("\tPortScanWorkers: %d\n", config.PortScanWorkers)
+	log.Printf("\tMaxParallelPodScans: %d\n", config.MaxParallelPodScans)
 	log.Printf("\tRescanIntervalMinutes: %d\n", config.RescanIntervalMinutes)
 	log.Printf("\tExpireAfterMinutes: %d\n", config.ExpireAfterMinutes)
 	log.Printf("\tMaxPort: %d\n", config.MaxPort)
@@ -259,6 +267,9 @@ func refreshPodInfo(podInfoCache *sync.Map, config *portScanCollectorConfig) {
 		return
 	}
 
+	var wg sync.WaitGroup
+	semaphore := make(chan struct{}, config.MaxParallelPodScans)
+
 	for _, pod := range podList.Items {
 		//exclude pod using HostNetwork
 		if !pod.Spec.HostNetwork {
@@ -267,21 +278,31 @@ func refreshPodInfo(podInfoCache *sync.Map, config *portScanCollectorConfig) {
 			podInfo := podInfoAny.(*PodInfo)
 			// if it is a new pod, or the last scan expired and it's not currently being scanned
 			if !found || (time.Since(podInfo.LastScanTime) >= config.RescanInterval && !podInfo.Scanning) {
-				podInfo.Scanning = true
-				podInfo.Namespace = pod.Namespace
-				podInfo.Name = pod.Name
 
-				// TODO: scans one pod at a time. might be worth to add some parallelism.
-				openPorts, scanDuration := scanPodPorts(pod.Status.PodIP, config)
+				go func(p v1.Pod, pinfo *PodInfo) {
+					wg.Add(1)
+					semaphore <- struct{}{}
+					defer func() {
+						<-semaphore
+						wg.Done()
+					}()
+					log.Printf("Scanning pod %s/%s", p.Namespace, p.Name)
+					pinfo.Scanning = true
+					pinfo.Namespace = p.Namespace
+					pinfo.Name = p.Name
 
-				podInfo.LastScanTime = time.Now()
-				podInfo.Scanning = false
-				podInfo.OpenPorts = openPorts
-				podInfo.LastScanDuration = scanDuration
-				log.Printf("Scanned pod %s/%s in %d ms, open ports: %v", pod.Namespace, pod.Name, scanDuration.Milliseconds(), openPorts)
+					openPorts, scanDuration := scanPodPorts(p.Status.PodIP, config)
+
+					pinfo.LastScanTime = time.Now()
+					pinfo.Scanning = false
+					pinfo.OpenPorts = openPorts
+					pinfo.LastScanDuration = scanDuration
+					log.Printf("Scanned pod %s/%s in %d ms, open ports: %v", p.Namespace, p.Name, scanDuration.Milliseconds(), openPorts)
+				}(pod, podInfo)
 			}
 		}
 	}
+	wg.Wait()
 }
 
 func main() {
@@ -298,7 +319,7 @@ func main() {
 	// Background loop to clean up pods from the cache that have not been scanned for 12 hours
 	go func() {
 		for {
-			time.Sleep(10 * time.Minute)
+			time.Sleep(60 * time.Minute)
 			cleanupExpiredInfo(podInfoMap, config.ExpireAfter)
 		}
 	}()
@@ -307,7 +328,7 @@ func main() {
 	go func() {
 		for {
 			refreshPodInfo(podInfoMap, config)
-			time.Sleep(1 * time.Minute)
+			time.Sleep(5 * time.Minute)
 		}
 	}()
 

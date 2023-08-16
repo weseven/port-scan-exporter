@@ -2,5 +2,6 @@ listen_address: ":8080"
 portscan_timeout_ms: 150
 max_port: 65535
 rescan_interval_minutes: 10
-portscan_workers: 10
+portscan_workers: 6
+max_parallel_pod_scans: 5
 expire_after_minutes: 20
