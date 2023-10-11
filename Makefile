@@ -110,7 +110,13 @@ KIND ?= $(LOCALBIN)/kind
 ## Tool Versions
 KIND_VERSION := 0.20.0
 
+LOCALKIND := $(shell kind --version 2>/dev/null)
+
 .PHONY: kind
-kind: $(LOCALBIN) ## Download Kind locally if necessary.
+kind: $(LOCALBIN) ## Download Kind locally if necessary. 
+ifdef LOCALKIND
+	ln -s $(shell which kind) $(KIND)
+else 
 	curl -fsSL -o ${KIND} https://github.com/kubernetes-sigs/kind/releases/download/v${KIND_VERSION}/kind-${LOCAL_OS}-${LOCAL_ARCH}
 	chmod +x ${KIND}
+endif
